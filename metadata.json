@@ -1,0 +1,8 @@
+{
+  "name": "Lumina Study Assistant",
+  "description": "An AI-powered study companion for university students to organize notes, analyze materials, and plan study schedules.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
