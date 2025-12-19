@@ -14,6 +14,14 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
         .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; }
     </style>
+    <!-- Polyfill for process.env must be here, before any modules are loaded to prevent ReferenceErrors -->
+    <script>
+      window.process = {
+        env: {
+          API_KEY: "" 
+        }
+      };
+    </script>
 <script type="importmap">
 {
   "imports": {
@@ -29,5 +37,7 @@
 </head>
 <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>
+    <!-- Load index.tsx as a module -->
+    <script type="module" src="./index.tsx"></script>
 </body>
 </html>
