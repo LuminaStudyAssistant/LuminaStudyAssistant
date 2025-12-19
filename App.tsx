@@ -35,7 +35,8 @@ const App: React.FC = () => {
 
   // Auth State Listener
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const metadata = session.user.user_metadata || {};
         const userName = metadata.full_name || session.user.email?.split('@')[0] || 'Student';
@@ -46,7 +47,9 @@ const App: React.FC = () => {
         });
       }
       setLoading(false);
-    });
+    };
+
+    initAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
@@ -165,28 +168,45 @@ const App: React.FC = () => {
   };
 
   const handleAddSubject = async (name: string) => {
-    if (!user) return;
+    if (!user) {
+      console.error("No authenticated user found.");
+      return;
+    }
+
     const color = `bg-${['blue', 'indigo', 'purple', 'emerald', 'rose'][Math.floor(Math.random() * 5)]}-500`;
     
+    // Explicit log to check the payload before sending to Supabase
+    console.log("Attempting to add subject for user:", user.id);
+
     const { data, error } = await supabase
       .from('subjects')
-      .insert([{ name, color, user_id: user.id }])
+      .insert([{ 
+        name, 
+        color, 
+        user_id: user.id 
+      }])
       .select()
       .single();
 
     if (error) { 
       console.error('Database Add Subject Error:', JSON.stringify(error, null, 2)); 
-      alert('Failed to add subject: ' + (error.message || 'Check database connection or RLS policies.'));
+      if (error.code === '42501') {
+        alert('Permission Denied: Please check your Supabase RLS policies for the "subjects" table. Ensure you have an INSERT policy enabled.');
+      } else {
+        alert('Failed to add subject: ' + (error.message || 'Check connection.'));
+      }
       return; 
     }
     
-    const newSubject: Subject = { 
-      id: String(data.id), 
-      name: String(data.name), 
-      color: String(data.color), 
-      folders: [] 
-    };
-    setSubjects(prev => [...prev, newSubject]);
+    if (data) {
+      const newSubject: Subject = { 
+        id: String(data.id), 
+        name: String(data.name), 
+        color: String(data.color), 
+        folders: [] 
+      };
+      setSubjects(prev => [...prev, newSubject]);
+    }
   };
 
   const handleDeleteSubject = async (id: string) => {
@@ -286,7 +306,6 @@ const App: React.FC = () => {
   const handleAddEvent = async (e: Partial<StudyEvent>) => {
     if (!user) return;
     
-    // Explicitly map camelCase to snake_case for the database insert
     const dbEventPayload = {
       title: e.title,
       date: e.date,
@@ -303,18 +322,24 @@ const App: React.FC = () => {
 
     if (error) { 
       console.error('Add Event Error:', JSON.stringify(error, null, 2));
-      alert('Failed to save event: ' + (error.message || 'Check database table structure and RLS.'));
+      if (error.code === '42501') {
+        alert('Permission Denied: Please check your Supabase RLS policies for the "events" table.');
+      } else {
+        alert('Failed to save event: ' + (error.message || 'Check connection.'));
+      }
       return; 
     }
     
-    const newEvent: StudyEvent = {
-      id: String(data.id),
-      title: String(data.title),
-      date: String(data.date),
-      type: data.type as any,
-      subjectId: data.subject_id ? String(data.subject_id) : undefined
-    };
-    setEvents(prev => [...prev, newEvent]);
+    if (data) {
+      const newEvent: StudyEvent = {
+        id: String(data.id),
+        title: String(data.title),
+        date: String(data.date),
+        type: data.type as any,
+        subjectId: data.subject_id ? String(data.subject_id) : undefined
+      };
+      setEvents(prev => [...prev, newEvent]);
+    }
   };
 
   const filteredSubjects = subjects.filter(s => 
@@ -322,7 +347,7 @@ const App: React.FC = () => {
     s.folders.some(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  if (loading && !user) return (
+  if (loading) return (
     <div className="h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
       <Loader2 className="w-10 h-10 animate-spin text-indigo-600" />
     </div>
