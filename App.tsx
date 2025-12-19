@@ -1,12 +1,14 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Search,
   Sparkles,
   Menu,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import { Subject, Folder, Note, StudyEvent } from './types';
+import { supabase } from './services/supabase';
 import Dashboard from './components/Dashboard';
 import Sidebar from './components/Sidebar';
 import NoteEditor from './components/NoteEditor';
@@ -17,73 +19,143 @@ import Auth from './components/Auth';
 import Settings from './components/Settings';
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+  const [user, setUser] = useState<{ name: string; email: string; id: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'subjects' | 'calendar' | 'chat' | 'settings'>('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   
-  // Settings State
   const [darkMode, setDarkMode] = useState(false);
   const [compactView, setCompactView] = useState(false);
 
-  const [subjects, setSubjects] = useState<Subject[]>([
-    {
-      id: '1',
-      name: 'Computer Science 101',
-      color: 'bg-indigo-500',
-      folders: [
-        {
-          id: 'f1',
-          subjectId: '1',
-          name: 'Lecture Notes',
-          notes: [
-            { id: 'n1', folderId: 'f1', title: 'Data Structures Intro', content: 'Arrays and Linked Lists are fundamental...', createdAt: new Date().toISOString() }
-          ]
-        }
-      ]
-    },
-    {
-      id: '2',
-      name: 'Modern History',
-      color: 'bg-emerald-500',
-      folders: []
-    }
-  ]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [events, setEvents] = useState<StudyEvent[]>([]);
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [expandedSubjectId, setExpandedSubjectId] = useState<string | null>(null);
-  const [events, setEvents] = useState<StudyEvent[]>([]);
+
+  // Auth State Listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const metadata = session.user.user_metadata || {};
+        const userName = metadata.full_name || session.user.email?.split('@')[0] || 'Student';
+        setUser({
+          id: String(session.user.id),
+          name: typeof userName === 'string' ? userName : 'Student',
+          email: String(session.user.email || '')
+        });
+      }
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const metadata = session.user.user_metadata || {};
+        const userName = metadata.full_name || session.user.email?.split('@')[0] || 'Student';
+        setUser({
+          id: String(session.user.id),
+          name: typeof userName === 'string' ? userName : 'Student',
+          email: String(session.user.email || '')
+        });
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchData = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+
+    try {
+      const { data: subjectsData, error: subjectsError } = await supabase
+        .from('subjects')
+        .select(`
+          id, name, color,
+          folders (
+            id, subject_id, name,
+            notes (
+              id, folder_id, title, content, created_at, summary
+            )
+          )
+        `)
+        .eq('user_id', user.id);
+
+      if (subjectsError) throw subjectsError;
+
+      const mappedSubjects: Subject[] = (subjectsData || []).map((s: any) => ({
+        id: String(s.id),
+        name: String(s.name),
+        color: String(s.color),
+        folders: (s.folders || []).map((f: any) => ({
+          id: String(f.id),
+          subjectId: String(f.subject_id),
+          name: String(f.name),
+          notes: (f.notes || []).map((n: any) => ({
+            id: String(n.id),
+            folderId: String(n.folder_id),
+            title: String(n.title),
+            content: String(n.content || ''),
+            createdAt: String(n.created_at),
+            summary: n.summary ? String(n.summary) : undefined
+          }))
+        }))
+      }));
+
+      setSubjects(mappedSubjects);
+
+      const { data: eventsData, error: eventsError } = await supabase
+        .from('events')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (eventsError) throw eventsError;
+      setEvents((eventsData || []).map((e: any) => ({
+        id: String(e.id),
+        title: String(e.title),
+        date: String(e.date),
+        type: e.type as any,
+        subjectId: e.subject_id ? String(e.subject_id) : undefined
+      })));
+
+    } catch (err: any) {
+      console.error('Error fetching data:', err.message || err);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('lumina_user');
-    if (savedUser) setUser(JSON.parse(savedUser));
-    
-    const savedEvents = localStorage.getItem('lumina_events');
-    if (savedEvents) setEvents(JSON.parse(savedEvents));
+    if (user) {
+      fetchData();
+    }
+  }, [user, fetchData]);
 
+  useEffect(() => {
     const savedSettings = localStorage.getItem('lumina_settings');
     if (savedSettings) {
-      const { darkMode: dm, compactView: cv } = JSON.parse(savedSettings);
-      setDarkMode(dm);
-      setCompactView(cv);
+      try {
+        const parsed = JSON.parse(savedSettings);
+        setDarkMode(!!parsed.darkMode);
+        setCompactView(!!parsed.compactView);
+      } catch (e) {
+        console.error("Settings parse error", e);
+      }
     }
   }, []);
 
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    if (darkMode) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
   }, [darkMode]);
 
-  const handleLogin = (userData: { name: string; email: string }) => {
-    setUser(userData);
-    localStorage.setItem('lumina_user', JSON.stringify(userData));
-  };
-
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
-    localStorage.removeItem('lumina_user');
+    setSubjects([]);
+    setEvents([]);
   };
 
   const handleSaveSettings = (newSettings: { darkMode: boolean; compactView: boolean }) => {
@@ -92,63 +164,95 @@ const App: React.FC = () => {
     localStorage.setItem('lumina_settings', JSON.stringify(newSettings));
   };
 
-  const handleAddSubject = (name: string) => {
-    const newSub: Subject = {
-      id: Date.now().toString(),
-      name,
-      color: `bg-${['blue', 'indigo', 'purple', 'emerald', 'rose'][Math.floor(Math.random() * 5)]}-500`,
-      folders: []
-    };
-    setSubjects([...subjects, newSub]);
-  };
-
-  const handleDeleteSubject = (id: string) => {
-    if (window.confirm('Delete this subject and all its contents?')) {
-      setSubjects(subjects.filter(s => s.id !== id));
-    }
-  };
-
-  const handleCreateFolder = (subjectId: string, name: string) => {
-    const newFolder: Folder = {
-      id: Date.now().toString(),
-      subjectId,
-      name,
-      notes: []
-    };
-    setSubjects(prev => prev.map(s => s.id === subjectId ? { ...s, folders: [...s.folders, newFolder] } : s));
-  };
-
-  const handleDeleteFolder = (subjectId: string, folderId: string) => {
-    if (window.confirm('Delete this folder and all its notes?')) {
-      setSubjects(prev => prev.map(s => s.id === subjectId ? { 
-        ...s, 
-        folders: s.folders.filter(f => f.id !== folderId) 
-      } : s));
-    }
-  };
-
-  const handleUpdateNote = (noteId: string, updates: Partial<Note>) => {
-    setSubjects(prev => prev.map(sub => ({
-      ...sub,
-      folders: sub.folders.map(fold => ({
-        ...fold,
-        notes: fold.notes.map(n => n.id === noteId ? { ...n, ...updates } : n)
-      }))
-    })));
-    if (selectedNote?.id === noteId) {
-      setSelectedNote(prev => prev ? { ...prev, ...updates } : null);
-    }
-  };
-
-  const handleCreateNote = (folderId: string) => {
-    const newNote: Note = {
-      id: Date.now().toString(),
-      folderId,
-      title: 'Untitled Note',
-      content: '',
-      createdAt: new Date().toISOString()
-    };
+  const handleAddSubject = async (name: string) => {
+    if (!user) return;
+    const color = `bg-${['blue', 'indigo', 'purple', 'emerald', 'rose'][Math.floor(Math.random() * 5)]}-500`;
     
+    const { data, error } = await supabase
+      .from('subjects')
+      .insert([{ name, color, user_id: user.id }])
+      .select()
+      .single();
+
+    if (error) { 
+      console.error('Database Add Subject Error:', JSON.stringify(error, null, 2)); 
+      alert('Failed to add subject: ' + (error.message || 'Check database connection or RLS policies.'));
+      return; 
+    }
+    
+    const newSubject: Subject = { 
+      id: String(data.id), 
+      name: String(data.name), 
+      color: String(data.color), 
+      folders: [] 
+    };
+    setSubjects(prev => [...prev, newSubject]);
+  };
+
+  const handleDeleteSubject = async (id: string) => {
+    if (!window.confirm('Delete subject and all contents?')) return;
+    const { error } = await supabase.from('subjects').delete().eq('id', id);
+    if (error) { console.error('Delete Subject Error:', error.message || error); return; }
+    setSubjects(prev => prev.filter(s => s.id !== id));
+  };
+
+  const handleCreateFolder = async (subjectId: string, name: string) => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('folders')
+      .insert([{ name, subject_id: subjectId, user_id: user.id }])
+      .select()
+      .single();
+
+    if (error) { console.error('Add Folder Error:', error.message || error); return; }
+
+    const newFolder: Folder = { 
+      id: String(data.id), 
+      subjectId: String(data.subject_id), 
+      name: String(data.name), 
+      notes: [] 
+    };
+
+    setSubjects(prev => prev.map(s => s.id === subjectId ? { 
+      ...s, 
+      folders: [...s.folders, newFolder] 
+    } : s));
+  };
+
+  const handleDeleteFolder = async (subjectId: string, folderId: string) => {
+    if (!window.confirm('Delete folder and all notes?')) return;
+    const { error } = await supabase.from('folders').delete().eq('id', folderId);
+    if (error) { console.error('Delete Folder Error:', error.message || error); return; }
+
+    setSubjects(prev => prev.map(s => s.id === subjectId ? { 
+      ...s, 
+      folders: s.folders.filter(f => f.id !== folderId) 
+    } : s));
+  };
+
+  const handleCreateNote = async (folderId: string) => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('notes')
+      .insert([{ 
+        title: 'Untitled Note', 
+        content: '', 
+        folder_id: folderId, 
+        user_id: user.id 
+      }])
+      .select()
+      .single();
+
+    if (error) { console.error('Add Note Error:', error.message || error); return; }
+
+    const newNote: Note = {
+      id: String(data.id),
+      folderId: String(data.folder_id),
+      title: String(data.title),
+      content: String(data.content || ''),
+      createdAt: String(data.created_at)
+    };
+
     setSubjects(prev => prev.map(sub => ({
       ...sub,
       folders: sub.folders.map(fold => fold.id === folderId ? { ...fold, notes: [...fold.notes, newNote] } : fold)
@@ -156,12 +260,61 @@ const App: React.FC = () => {
     setSelectedNote(newNote);
   };
 
-  const handleAddEvent = (e: StudyEvent) => {
-    setEvents(prev => {
-      const updated = [...prev, e];
-      localStorage.setItem('lumina_events', JSON.stringify(updated));
-      return updated;
-    });
+  const handleUpdateNote = async (noteId: string, updates: Partial<Note>) => {
+    if (!user) return;
+    const dbUpdates: any = {};
+    if (updates.title !== undefined) dbUpdates.title = String(updates.title);
+    if (updates.content !== undefined) dbUpdates.content = String(updates.content);
+    if (updates.summary !== undefined) dbUpdates.summary = updates.summary ? String(updates.summary) : null;
+
+    const { error } = await supabase.from('notes').update(dbUpdates).eq('id', noteId);
+    if (error) { console.error('Update Note Error:', error.message || error); return; }
+
+    setSubjects(prev => prev.map(sub => ({
+      ...sub,
+      folders: sub.folders.map(fold => ({
+        ...fold,
+        notes: fold.notes.map(n => n.id === noteId ? { ...n, ...updates } : n)
+      }))
+    })));
+
+    if (selectedNote?.id === noteId) {
+      setSelectedNote(prev => prev ? { ...prev, ...updates } : null);
+    }
+  };
+
+  const handleAddEvent = async (e: Partial<StudyEvent>) => {
+    if (!user) return;
+    
+    // Explicitly map camelCase to snake_case for the database insert
+    const dbEventPayload = {
+      title: e.title,
+      date: e.date,
+      type: e.type,
+      subject_id: e.subjectId || null,
+      user_id: user.id
+    };
+
+    const { data, error } = await supabase
+      .from('events')
+      .insert([dbEventPayload])
+      .select()
+      .single();
+
+    if (error) { 
+      console.error('Add Event Error:', JSON.stringify(error, null, 2));
+      alert('Failed to save event: ' + (error.message || 'Check database table structure and RLS.'));
+      return; 
+    }
+    
+    const newEvent: StudyEvent = {
+      id: String(data.id),
+      title: String(data.title),
+      date: String(data.date),
+      type: data.type as any,
+      subjectId: data.subject_id ? String(data.subject_id) : undefined
+    };
+    setEvents(prev => [...prev, newEvent]);
   };
 
   const filteredSubjects = subjects.filter(s => 
@@ -169,7 +322,13 @@ const App: React.FC = () => {
     s.folders.some(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  if (!user) return <Auth onLogin={handleLogin} />;
+  if (loading && !user) return (
+    <div className="h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+      <Loader2 className="w-10 h-10 animate-spin text-indigo-600" />
+    </div>
+  );
+
+  if (!user) return <Auth onLogin={(u) => setUser(u)} />;
 
   const themeClasses = darkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900';
 
@@ -202,7 +361,7 @@ const App: React.FC = () => {
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
               <input 
                 type="text" 
-                placeholder="Quick search..." 
+                placeholder="Cloud search..." 
                 className={`pl-10 pr-4 py-2 rounded-xl border-none text-sm focus:ring-2 focus:ring-indigo-500 w-48 lg:w-72 transition-all ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'}`}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -222,7 +381,7 @@ const App: React.FC = () => {
               onClick={() => setActiveTab('settings')}
               className="w-9 h-9 lg:w-11 lg:h-11 rounded-2xl bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex items-center justify-center font-bold text-xs lg:text-sm hover:ring-4 hover:ring-indigo-100 dark:hover:ring-indigo-900/50 transition-all shrink-0 overflow-hidden"
             >
-              {user.name[0]}
+              {user.name && typeof user.name === 'string' ? user.name[0] : '?'}
             </button>
           </div>
         </header>

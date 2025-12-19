@@ -1,9 +1,10 @@
 
 import React, { useState } from 'react';
-import { BookOpen, LogIn, UserPlus } from 'lucide-react';
+import { BookOpen, LogIn, UserPlus, Loader2 } from 'lucide-react';
+import { supabase } from '../services/supabase';
 
 interface AuthProps {
-  onLogin: (user: { name: string; email: string }) => void;
+  onLogin: (user: { name: string; email: string; id: string }) => void;
 }
 
 const Auth: React.FC<AuthProps> = ({ onLogin }) => {
@@ -11,10 +12,50 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin({ name: name || 'Student User', email });
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (isLogin) {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
+        if (data.user) {
+          onLogin({ 
+            id: data.user.id, 
+            name: data.user.user_metadata?.full_name || email.split('@')[0], 
+            email: data.user.email || email 
+          });
+        }
+      } else {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { full_name: name }
+          }
+        });
+        if (error) throw error;
+        if (data.user) {
+          onLogin({ 
+            id: data.user.id, 
+            name: name || email.split('@')[0], 
+            email: data.user.email || email 
+          });
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -27,7 +68,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
               <BookOpen className="w-7 h-7 text-white" />
             </div>
             <h1 className="text-2xl font-bold tracking-tight">Lumina Study</h1>
-            <p className="text-indigo-100 text-[10px] uppercase font-bold tracking-widest mt-2">Elevate your learning</p>
+            <p className="text-indigo-100 text-[10px] uppercase font-bold tracking-widest mt-2">Cloud-Powered Learning</p>
           </div>
         </div>
 
@@ -36,20 +77,26 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             <div className="inline-flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl w-full">
               <button 
                 type="button"
-                onClick={() => setIsLogin(true)}
+                onClick={() => { setIsLogin(true); setError(null); }}
                 className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${isLogin ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
               >
                 Login
               </button>
               <button 
                 type="button"
-                onClick={() => setIsLogin(false)}
+                onClick={() => { setIsLogin(false); setError(null); }}
                 className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${!isLogin ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
               >
                 Sign Up
               </button>
             </div>
           </div>
+
+          {error && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-500 text-xs font-bold text-center border border-rose-100 dark:border-rose-900/30">
+              {error}
+            </div>
+          )}
 
           <div className="space-y-4">
             {!isLogin && (
@@ -72,7 +119,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                 type="email" 
                 required
                 className="w-full px-5 py-3.5 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-sm dark:text-slate-100"
-                placeholder="email@example.com"
+                placeholder="email@university.edu"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
@@ -93,14 +140,15 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
 
           <button 
             type="submit"
-            className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-500/20 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 mt-2 active:scale-95"
+            disabled={loading}
+            className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-500/20 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 mt-2 active:scale-95 disabled:opacity-50"
           >
-            {isLogin ? <LogIn className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (isLogin ? <LogIn className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />)}
             {isLogin ? 'Enter Workspace' : 'Create Account'}
           </button>
 
           <p className="text-center text-slate-400 text-[10px] leading-relaxed">
-            By continuing, you agree to Lumina's academic integrity standards and privacy policies.
+            Secured by Supabase Cloud Infrastructure.
           </p>
         </form>
       </div>
