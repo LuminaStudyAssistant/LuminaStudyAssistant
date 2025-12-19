@@ -23,7 +23,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'subjects' | 'calendar' | 'chat' | 'settings'>('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
   
   const [darkMode, setDarkMode] = useState(false);
   const [compactView, setCompactView] = useState(false);
@@ -46,7 +47,7 @@ const App: React.FC = () => {
           email: String(session.user.email || '')
         });
       }
-      setLoading(false);
+      setInitialLoading(false);
     };
 
     initAuth();
@@ -68,9 +69,10 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (isInitial = false) => {
     if (!user) return;
-    setLoading(true);
+    if (isInitial) setInitialLoading(true);
+    else setIsSyncing(true);
 
     try {
       const { data: subjectsData, error: subjectsError } = await supabase
@@ -126,13 +128,14 @@ const App: React.FC = () => {
     } catch (err: any) {
       console.error('Error fetching data:', err.message || err);
     } finally {
-      setLoading(false);
+      if (isInitial) setInitialLoading(false);
+      setIsSyncing(false);
     }
   }, [user?.id]);
 
   useEffect(() => {
     if (user) {
-      fetchData();
+      fetchData(true);
     }
   }, [user, fetchData]);
 
@@ -173,10 +176,19 @@ const App: React.FC = () => {
       return;
     }
 
+    setSearchQuery('');
+
     const color = `bg-${['blue', 'indigo', 'purple', 'emerald', 'rose'][Math.floor(Math.random() * 5)]}-500`;
     
-    // Explicit log to check the payload before sending to Supabase
-    console.log("Attempting to add subject for user:", user.id);
+    // Optimistic UI update
+    const tempId = 'temp-' + Date.now();
+    const tempSubject: Subject = { 
+      id: tempId, 
+      name, 
+      color, 
+      folders: [] 
+    };
+    setSubjects(prev => [...prev, tempSubject]);
 
     const { data, error } = await supabase
       .from('subjects')
@@ -189,9 +201,12 @@ const App: React.FC = () => {
       .single();
 
     if (error) { 
+      // Rollback optimistic update
+      setSubjects(prev => prev.filter(s => s.id !== tempId));
+      
       console.error('Database Add Subject Error:', JSON.stringify(error, null, 2)); 
       if (error.code === '42501') {
-        alert('Permission Denied: Please check your Supabase RLS policies for the "subjects" table. Ensure you have an INSERT policy enabled.');
+        alert('Permission Denied (RLS Policy Error):\n\nPlease ensure your Supabase "subjects" table has a policy that allows "INSERT" for authenticated users.\n\nYou can run this in Supabase SQL Editor:\nCREATE POLICY "Users can insert their own subjects" ON subjects FOR INSERT WITH CHECK (auth.uid() = user_id);');
       } else {
         alert('Failed to add subject: ' + (error.message || 'Check connection.'));
       }
@@ -199,13 +214,13 @@ const App: React.FC = () => {
     }
     
     if (data) {
-      const newSubject: Subject = { 
-        id: String(data.id), 
-        name: String(data.name), 
-        color: String(data.color), 
-        folders: [] 
-      };
-      setSubjects(prev => [...prev, newSubject]);
+      // Replace temp with real data
+      setSubjects(prev => prev.map(s => s.id === tempId ? {
+        ...s,
+        id: String(data.id)
+      } : s));
+      setExpandedSubjectId(String(data.id));
+      setActiveTab('subjects');
     }
   };
 
@@ -322,11 +337,7 @@ const App: React.FC = () => {
 
     if (error) { 
       console.error('Add Event Error:', JSON.stringify(error, null, 2));
-      if (error.code === '42501') {
-        alert('Permission Denied: Please check your Supabase RLS policies for the "events" table.');
-      } else {
-        alert('Failed to save event: ' + (error.message || 'Check connection.'));
-      }
+      alert('Failed to save event: ' + (error.message || 'Check connection.'));
       return; 
     }
     
@@ -347,9 +358,12 @@ const App: React.FC = () => {
     s.folders.some(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  if (loading) return (
+  if (initialLoading) return (
     <div className="h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-      <Loader2 className="w-10 h-10 animate-spin text-indigo-600" />
+      <div className="text-center space-y-4">
+        <Loader2 className="w-10 h-10 animate-spin text-indigo-600 mx-auto" />
+        <p className="text-slate-400 font-medium animate-pulse">Initializing your workspace...</p>
+      </div>
     </div>
   );
 
@@ -392,6 +406,12 @@ const App: React.FC = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+            {isSyncing && (
+              <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest animate-pulse">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>Syncing</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 lg:gap-6">
             <button 
@@ -422,6 +442,7 @@ const App: React.FC = () => {
                   if (id === 'calendar') setActiveTab('calendar');
                   else { setExpandedSubjectId(id); setActiveTab('subjects'); }
                 }}
+                onAddSubject={handleAddSubject}
                 darkMode={darkMode}
               />
             )}

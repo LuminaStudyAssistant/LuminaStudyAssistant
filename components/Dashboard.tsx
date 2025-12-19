@@ -1,17 +1,19 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Subject, StudyEvent, Note } from '../types';
-import { Clock, Calendar as CalendarIcon, BookOpen, ChevronRight, Activity } from 'lucide-react';
+import { Clock, Calendar as CalendarIcon, BookOpen, ChevronRight, Activity, Plus } from 'lucide-react';
 
 interface DashboardProps {
   subjects: Subject[];
   events: StudyEvent[];
   onNoteClick: (note: Note) => void;
   onOpenSubject: (id: string) => void;
+  onAddSubject?: (name: string) => void;
   darkMode?: boolean;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ subjects, events, onNoteClick, onOpenSubject, darkMode }) => {
+const Dashboard: React.FC<DashboardProps> = ({ subjects, events, onNoteClick, onOpenSubject, onAddSubject, darkMode }) => {
+  const [newSubName, setNewSubName] = useState('');
   const recentNotes = subjects.flatMap(s => s.folders.flatMap(f => f.notes)).slice(0, 3);
   const upcomingEvents = [...events].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(0, 3);
 
@@ -19,11 +21,19 @@ const Dashboard: React.FC<DashboardProps> = ({ subjects, events, onNoteClick, on
   const textTitle = darkMode ? 'text-slate-100' : 'text-slate-800';
   const textBody = darkMode ? 'text-slate-400' : 'text-slate-500';
 
+  const handleQuickAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newSubName.trim() && onAddSubject) {
+      onAddSubject(newSubName.trim());
+      setNewSubName('');
+    }
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-12 max-w-7xl mx-auto">
       <section className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className={`text-2xl lg:text-3xl font-bold ${textTitle}`}>Your Overview</h2>
+          <h2 className={`text-2xl lg:text-3xl font-bold ${textTitle}`}>Welcome back!</h2>
           <p className={`${textBody} mt-1 text-sm lg:text-base`}>Manage your curriculum and study progress effortlessly.</p>
         </div>
         <div className={`px-4 py-2 rounded-2xl flex items-center gap-3 ${darkMode ? 'bg-slate-800' : 'bg-white border border-slate-200'}`}>
@@ -54,8 +64,24 @@ const Dashboard: React.FC<DashboardProps> = ({ subjects, events, onNoteClick, on
                 </div>
               </div>
             )) : (
-              <div className={`col-span-full py-16 text-center border border-dashed rounded-[2rem] ${darkMode ? 'bg-slate-800/20 border-slate-700' : 'bg-slate-100/50 border-slate-200'}`}>
-                <p className="text-slate-400 text-sm font-medium">No subjects found. Start by creating your first course.</p>
+              <div className={`col-span-full p-10 text-center border-2 border-dashed rounded-[2.5rem] flex flex-col items-center justify-center ${darkMode ? 'bg-slate-800/10 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-900/30 rounded-3xl flex items-center justify-center mb-6">
+                  <Plus className="w-8 h-8 text-indigo-500" />
+                </div>
+                <h4 className={`text-lg font-bold mb-2 ${textTitle}`}>Ready to start?</h4>
+                <p className="text-slate-400 text-sm font-medium mb-6 max-w-xs">Create your first subject to begin organizing your study materials.</p>
+                <form onSubmit={handleQuickAdd} className="w-full max-w-sm flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="Enter Course Title..."
+                    className={`flex-1 px-5 py-3 rounded-2xl border outline-none focus:ring-2 focus:ring-indigo-500 text-sm transition-all ${darkMode ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+                    value={newSubName}
+                    onChange={(e) => setNewSubName(e.target.value)}
+                  />
+                  <button className="bg-indigo-600 text-white p-3 rounded-2xl hover:bg-indigo-700 shadow-lg shadow-indigo-500/20 active:scale-95 transition-all">
+                    <Plus className="w-5 h-5" />
+                  </button>
+                </form>
               </div>
             )}
           </div>
